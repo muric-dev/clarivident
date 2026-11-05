@@ -1,0 +1,25 @@
+{
+  "model": "opusplan",
+  "effortLevel": "medium",
+  "maxEffortLevel": "xhigh",
+  "subagentPromptCacheTtl": "5m",
+  "permissions": {
+    "deny": [
+      "Read(~/Library/Application Support/clarivident/**)",
+      "Bash(security find-generic-password*)"
+    ]
+  },
+  "hooks": {
+    "PostToolUse": [
+      {
+        "matcher": "Edit|Write",
+        "hooks": [{ "type": "command", "command": "\"$CLAUDE_PROJECT_DIR\"/scripts/hook-go.sh" }]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [{ "type": "command", "command": "\"$CLAUDE_PROJECT_DIR\"/scripts/hook-stop.sh" }]
+      }
+    ]
+  }
+}
