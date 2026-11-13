@@ -2,7 +2,50 @@ version: "2"
 linters:
   enable:
     - funlen
+    - forbidigo
+    - godox
+    - errorlint
+    - revive
+    - gocognit
+    - depguard
   settings:
     funlen:
       lines: 40
       statements: -1
+    gocognit:
+      min-complexity: 15
+    depguard:
+      rules:
+        no-net:
+          files: ["$all"]
+          deny:
+            - {pkg: net, desc: the binary must not link net}
+            - {pkg: crypto/tls, desc: the binary must not link net}
+            - {pkg: io/ioutil, desc: deprecated}
+        platform-only:
+          files: ["$all", "!**/internal/platform/**"]
+          deny:
+            - {pkg: os/exec, desc: system commands live in internal/platform}
+            - {pkg: syscall, desc: system calls live in internal/platform}
+            - {pkg: golang.org/x/sys/unix, desc: system calls live in internal/platform}
+            - {pkg: github.com/zalando/go-keyring, desc: only internal/platform touches the Keychain}
+    godox:
+      keywords: [TEMP, DEBUG, HACK, XXX, FIXME, REMOVE]
+    forbidigo:
+      forbid:
+        # The only write is the vault, under its own directory. Everything else is lstat and readdir.
+        - pattern: '^os\.(Remove|RemoveAll|Rename|Create|CreateTemp|WriteFile|OpenFile|Open|ReadFile|Chmod|Chown|Lchown|Chtimes|Truncate|Mkdir|MkdirAll|Symlink|Link|Stat|NewFile)$'
+          msg: only internal/vault may touch files; user paths get lstat and readdir
+        - pattern: '^(print|println|fmt\.(Print|Printf|Println))$'
+          msg: leftover output
+        - pattern: '^t\.(Skip|Skipf|SkipNow)$'
+          msg: skipped test
+  exclusions:
+    rules:
+      # The vault owns its directory. Tests build their own fixtures under t.TempDir().
+      - path: ^internal/vault/
+        linters: [forbidigo]
+        text: 'os\.'
+      - path: _test\.go$
+        linters: [forbidigo]
+        text: 'os\.'
