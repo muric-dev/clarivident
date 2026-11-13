@@ -1,0 +1,69 @@
+#!/usr/bin/env bash
+# Pre-commit: did I mess up? Runs on every commit the user makes, after the user stages.
+# Same idea as the did-i-mess-up plugin, for Go:
+#   1. gofmt on the staged Go files                           (blocking)
+#   2. make fmt vet lint test sizecheck nonet                 (blocking; vuln stays in make check)
+#      lint also catches leftovers and writes outside internal/vault (see .golangci.yml)
+#   3. Haiku reviews the staged diff                          (blocking only on BLOCK)
+# Bypass: SKIP_HAIKU=1 git commit skips step 3. git commit --no-verify skips everything.
+set -uo pipefail
+
+say() { printf '[pre-commit] %s\n' "$*"; }
+fail() {
+	printf '[pre-commit] x %s\n' "$*"
+	exit 1
+}
+
+cd "$(git rev-parse --show-toplevel)" || exit 1
+DIFF=$(git diff --cached)
+[ -n "$DIFF" ] || {
+	say "nothing staged, nothing to check."
+	exit 0
+}
+
+go_staged=$(git diff --cached --name-only --diff-filter=ACM -- '*.go' go.mod go.sum)
+if [ -n "$go_staged" ]; then
+	say "1/3 gofmt..."
+	unformatted=$(git diff --cached --name-only -z --diff-filter=ACM -- '*.go' | xargs -0 gofmt -l)
+	[ -z "$unformatted" ] || fail "gofmt has notes on: $unformatted. Run gofmt -w on them and stage again."
+
+	say "2/3 make fmt vet lint test sizecheck nonet..."
+	make -s fmt vet lint test sizecheck nonet || fail "the gates disagree with you. Fix them, then commit."
+else
+	say "no Go files staged: steps 1 and 2 skipped."
+fi
+
+if git diff --cached --name-only --diff-filter=ACM | grep -Eq '\.sh$|^scripts/hooks/'; then
+	say "shell files staged: make shell..."
+	make -s shell || fail "the shell gates disagree with you. Fix them, then commit."
+fi
+
+if [ "${SKIP_HAIKU:-0}" = "1" ] || ! command -v claude >/dev/null 2>&1; then
+	say "3/3 Haiku review skipped."
+	say "ok. The machines found nothing."
+	exit 0
+fi
+
+say "3/3 asking Haiku: did I mess up? (the staged diff is sent to Claude)"
+PROMPT='You are a pre-commit gate for a read-only macOS disk TUI written in Go. The diff on stdin is about to be committed.
+Linters already cover writes outside the vault, leftovers, skipped tests, and net imports. Look ONLY for what they cannot see:
+hardcoded values overriding real data, disabled branches, fake delays, commented-out logic,
+or a change that contradicts what the surrounding code and tests intend.
+Reply in plain text, no markdown headers. First line exactly "VERDICT: OK" or "VERDICT: BLOCK".
+Then at most 5 short bullets "file:line - issue", or one short line if OK. Only BLOCK when you are confident.'
+
+review=$(printf '%s' "${DIFF:0:150000}" |
+	perl -e 'alarm shift; exec @ARGV' 120 \
+		claude -p "$PROMPT" --model haiku --tools "" --strict-mcp-config \
+		--disable-slash-commands --no-session-persistence 2>/dev/null)
+status=$?
+
+if [ $status -ne 0 ] || [ -z "$review" ]; then
+	say "Haiku did not answer (exit $status). Not blocking."
+elif printf '%s' "$review" | head -n 1 | grep -q 'VERDICT: BLOCK'; then
+	printf '%s\n' "$review" | sed 's/^/    /'
+	fail "Haiku believes you messed up. If you disagree: SKIP_HAIKU=1 git commit"
+else
+	printf '%s\n' "$review" | sed 's/^/    /'
+fi
+say "ok. Commit away."
