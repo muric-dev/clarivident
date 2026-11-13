@@ -41,7 +41,7 @@ Data by category
 
 ### Requirements
 - macOS 27.x (tested on 27.2)
-- Go 1.26+ to build it
+- Go 1.27+ to build it
 - Full Disk Access for your terminal if you want Mail, Messages, iCloud and Trash included
 
 ### Usage
